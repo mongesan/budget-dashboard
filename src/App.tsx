@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   PieChart,
   Pie,
@@ -68,6 +68,10 @@ const card = {
   marginBottom: 14,
 };
 
+// JSONBIN.io
+const BIN_ID = import.meta.env.VITE_JSONBIN_BIN_ID;
+const API_KEY = import.meta.env.VITE_JSONBIN_API_KEY;
+
 function initData() {
   try {
     const r = localStorage.getItem(STORAGE_KEY);
@@ -87,6 +91,15 @@ function initData() {
 // ── メインコンポーネント ──────────────────────────
 export default function App() {
   const [d, setD] = useState(initData);
+  // 同期ステータス: 'idle' | 'saving' | 'saved' | 'error'
+  const [syncStatus, setSyncStatus] = useState('idle');
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  
+  // デバウンス用のタイマーを保持
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  // 初回レンダリング（読み込み時）の自動保存を防ぐためのフラグ
+  const isInitialMount = useRef(true);
+
   const [tab, setTab] = useState('dashboard');
 
   // 入力フォーム
@@ -141,6 +154,54 @@ export default function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
     } catch {}
   }, [d]);
+
+  // クラウドへの自動保存 (PUSH)
+  useEffect(() => {
+    // 1. 初回レンダリング時はスキップ
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    // 2. 設定（APIキー等）がない場合はスキップ
+    if (!BIN_ID || !API_KEY) return;
+
+    // 3. 前回のタイマーがあればキャンセル（デバウンス処理）
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    setSyncStatus('saving');
+
+    // 4. 5秒間操作が止まったら実行
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Master-Key': API_KEY,
+          },
+          body: JSON.stringify(d),
+        });
+
+        if (res.ok) {
+          setSyncStatus('saved');
+          setLastSync(new Date().toLocaleTimeString());
+        } else {
+          throw new Error('Sync failed');
+        }
+      } catch (err) {
+        console.error(err);
+        setSyncStatus('error');
+      }
+    }, 5000); // 5000ms (5秒) の待機時間
+
+    // クリーンアップ処理
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [d]); // データ 'd' が変更されるたびに実行
 
   // カテゴリリスト
   const incomeCats = useMemo(
@@ -426,6 +487,11 @@ export default function App() {
               {disp(totalBalance)}
             </div>
             <div style={{ fontSize: 12, opacity: 0.8 }}>総合計残高</div>
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.8, marginTop: 4 }}>
+            {syncStatus === 'saving' && '🔄 クラウドに保存中...'}
+            {syncStatus === 'saved' && `✅ 保存済み (${lastSync})`}
+            {syncStatus === 'error' && '⚠️ 保存エラーが発生しました'}
           </div>
           <button
             onClick={() => setHideAmt((v) => !v)}
