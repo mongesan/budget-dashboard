@@ -173,7 +173,7 @@ export default function App() {
 
     setSyncStatus('saving');
 
-    // 4. 5秒間操作が止まったら実行
+    // 4. 3秒間操作が止まったら実行
     debounceTimer.current = setTimeout(async () => {
       try {
         const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
@@ -195,7 +195,7 @@ export default function App() {
         console.error(err);
         setSyncStatus('error');
       }
-    }, 5000); // 5000ms (5秒) の待機時間
+    }, 3000); // 3000ms (3秒) の待機時間
 
     // クリーンアップ処理
     return () => {
