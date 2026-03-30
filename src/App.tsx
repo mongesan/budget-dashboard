@@ -99,6 +99,7 @@ export default function App() {
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   // 初回レンダリング（読み込み時）の自動保存を防ぐためのフラグ
   const isInitialMount = useRef(true);
+  const isFetching = useRef(false);
 
   const [tab, setTab] = useState('dashboard');
 
@@ -155,54 +156,86 @@ export default function App() {
     } catch {}
   }, [d]);
 
-  // クラウドへの自動保存 (PUSH)
-  useEffect(() => {
-    // 1. 初回レンダリング時はスキップ
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-
-    // 2. 設定（APIキー等）がない場合はスキップ
+// ── 1. 起動時に自動でデータを取得 (FETCH) ──────────────────
+useEffect(() => {
+  const fetchData = async () => {
     if (!BIN_ID || !API_KEY) return;
+    
+    isFetching.current = true; // ★取得開始フラグを立てる
+    setSyncStatus('saving'); 
 
-    // 3. 前回のタイマーがあればキャンセル（デバウンス処理）
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
+    try {
+      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+        method: 'GET',
+        headers: { 'X-Master-Key': API_KEY },
+      });
 
-    setSyncStatus('saving');
-
-    // 4. 3秒間操作が止まったら実行
-    debounceTimer.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Master-Key': API_KEY,
-          },
-          body: JSON.stringify(d),
-        });
-
-        if (res.ok) {
+      if (res.ok) {
+        const json = await res.json();
+        if (json.record) {
+          setD(json.record); // ここでデータが入る
           setSyncStatus('saved');
           setLastSync(new Date().toLocaleTimeString());
-        } else {
-          throw new Error('Sync failed');
         }
-      } catch (err) {
-        console.error(err);
-        setSyncStatus('error');
+      } else {
+        throw new Error('Fetch failed');
       }
-    }, 3000); // 3000ms (3秒) の待機時間
+    } catch (err) {
+      console.error("起動時のデータ取得に失敗しました:", err);
+      setSyncStatus('error');
+    } finally {
+      // 少し遅延させてフラグを落とすとより安全です
+      setTimeout(() => { isFetching.current = false; }, 500); 
+    }
+  };
 
-    // クリーンアップ処理
-    return () => {
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    };
-  }, [d]); // データ 'd' が変更されるたびに実行
+  fetchData();
+}, []);
 
+
+// ── 2. クラウドへの自動保存 (PUSH) ──────────────────
+useEffect(() => {
+  // ★ 初回レンダリング時、または「データ取得中」は保存処理をスキップ
+  if (isInitialMount.current || isFetching.current) {
+    isInitialMount.current = false;
+    return;
+  }
+
+  if (!BIN_ID || !API_KEY) return;
+
+  if (debounceTimer.current) {
+    clearTimeout(debounceTimer.current);
+  }
+
+  setSyncStatus('saving');
+
+  debounceTimer.current = setTimeout(async () => {
+    try {
+      const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': API_KEY,
+        },
+        body: JSON.stringify(d),
+      });
+
+      if (res.ok) {
+        setSyncStatus('saved');
+        setLastSync(new Date().toLocaleTimeString());
+      } else {
+        throw new Error('Sync failed');
+      }
+    } catch (err) {
+      console.error(err);
+      setSyncStatus('error');
+    }
+  }, 3000);
+
+  return () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+  };
+}, [d]);
   // カテゴリリスト
   const incomeCats = useMemo(
     () => [...DEFAULT_INCOME_CATS, ...(d.customIncome || [])],
