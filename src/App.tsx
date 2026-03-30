@@ -1361,6 +1361,7 @@ useEffect(() => {
                     borderRadius: 7,
                     fontSize: 13,
                     textAlign: 'right',
+                    color: 'white'
                   }}
                 />
                 <button
